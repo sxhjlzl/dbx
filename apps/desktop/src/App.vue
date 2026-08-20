@@ -92,6 +92,7 @@ import {
 import { isPreviewTab } from "@/lib/tabs/tabPresentation";
 import { createTabNavigationHistory, moveInTabNavigationHistory, recordTabVisit } from "@/lib/tabs/tabNavigationHistory";
 import { initialTabSwitcherSelection, moveTabSwitcherSelection, tabSwitcherOrder } from "@/lib/tabs/tabSwitcher";
+import { createTabSwitcherKeyboardController } from "@/lib/tabs/tabSwitcherKeyboard";
 import { formatShortcutDisplay } from "@/lib/editor/shortcutDisplay";
 import { supportsSqlFileExecution } from "@/lib/database/databaseCapabilities";
 import { classifyAiSqlExecution } from "@/lib/ai/aiSqlExecutionPolicy";
@@ -229,9 +230,6 @@ const showSettingsPage = computed(() => settingsPageTabOpen.value && settingsSto
 const showQuickOpen = ref(false);
 const showTabSwitcher = ref(false);
 const tabSwitcherIndex = ref(0);
-// Modifiers held when the switcher was opened; releasing any of them commits
-// the highlighted tab, JetBrains-style.
-const tabSwitcherHeldModifiers = ref({ meta: false, ctrl: false, alt: false });
 const agentDriverUpdateCount = ref(0);
 const showHistory = ref(false);
 const showAiPanel = ref(safeLocalStorageGet("dbx-ai-panel-open") === "true");
@@ -2278,7 +2276,7 @@ const tabSwitcherShortcutHint = computed(() => formatShortcutDisplay(settingsSto
 function handleTabSwitcherShortcut(direction: -1 | 1, e: KeyboardEvent): boolean {
   if (!queryStore.tabs.length) return false;
   if (!showTabSwitcher.value) {
-    tabSwitcherHeldModifiers.value = { meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey };
+    tabSwitcherKeyboard.rememberOpeningEvent(e);
     tabSwitcherIndex.value = initialTabSwitcherSelection(tabSwitcherTabs.value.length);
     showTabSwitcher.value = true;
   } else {
@@ -2288,6 +2286,7 @@ function handleTabSwitcherShortcut(direction: -1 | 1, e: KeyboardEvent): boolean
 }
 
 function closeTabSwitcher(commit: boolean) {
+  tabSwitcherKeyboard.reset();
   if (!showTabSwitcher.value) return;
   showTabSwitcher.value = false;
   if (!commit) return;
@@ -2296,17 +2295,40 @@ function closeTabSwitcher(commit: boolean) {
 }
 
 function handleKeyup(e: KeyboardEvent) {
-  if (!showTabSwitcher.value) return;
-  const held = tabSwitcherHeldModifiers.value;
-  if ((held.ctrl && !e.ctrlKey) || (held.meta && !e.metaKey) || (held.alt && !e.altKey)) {
-    closeTabSwitcher(true);
-  }
+  tabSwitcherKeyboard.handleKeyup(e);
+}
+
+function handleTabSwitcherKeydownCapture(e: KeyboardEvent) {
+  tabSwitcherKeyboard.handleKeydownCapture(e);
+}
+
+function handleTabSwitcherWindowBlur() {
+  tabSwitcherKeyboard.handleWindowBlur();
+}
+
+function handleTabSwitcherVisibilityChange() {
+  tabSwitcherKeyboard.handleVisibilityChange(document.visibilityState);
 }
 
 function handleTabSwitcherSelect(tabId: string) {
+  tabSwitcherKeyboard.reset();
   showTabSwitcher.value = false;
   activateQueryTab(tabId);
 }
+
+function handleTabSwitcherOpenChange(open: boolean) {
+  if (!open) closeTabSwitcher(false);
+}
+
+const tabSwitcherKeyboard = createTabSwitcherKeyboardController({
+  isOpen: () => showTabSwitcher.value,
+  shortcut: () => settingsStore.editorSettings.shortcuts.tabSwitcher,
+  move: (direction) => {
+    tabSwitcherIndex.value = moveTabSwitcherSelection(tabSwitcherIndex.value, direction, tabSwitcherTabs.value.length);
+  },
+  commit: () => closeTabSwitcher(true),
+  cancel: () => closeTabSwitcher(false),
+});
 
 function handleNativeSelectAll(e: KeyboardEvent) {
   if (shouldBlockAppNativeSelectAll(e)) e.preventDefault();
@@ -2317,26 +2339,7 @@ async function handleKeydown(e: KeyboardEvent) {
 
   const shortcuts = settingsStore.editorSettings.shortcuts;
   const tabSwitcherDirection = tabSwitcherDirectionFromShortcut(e, shortcuts);
-  if (showTabSwitcher.value) {
-    if (tabSwitcherDirection) {
-      e.preventDefault();
-      e.stopPropagation();
-      handleTabSwitcherShortcut(tabSwitcherDirection, e);
-    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      e.stopPropagation();
-      tabSwitcherIndex.value = moveTabSwitcherSelection(tabSwitcherIndex.value, e.key === "ArrowDown" ? 1 : -1, tabSwitcherTabs.value.length);
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      e.stopPropagation();
-      closeTabSwitcher(true);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      closeTabSwitcher(false);
-    }
-    return;
-  }
+  if (showTabSwitcher.value) return;
   if (tabSwitcherDirection) {
     e.preventDefault();
     e.stopPropagation();
@@ -2617,8 +2620,11 @@ onMounted(async () => {
   applyTheme();
   void applyUiScale(settingsStore.editorSettings.uiScale);
   window.addEventListener("keydown", handleNativeSelectAll, true);
+  window.addEventListener("keydown", handleTabSwitcherKeydownCapture, true);
   window.addEventListener("keydown", handleKeydown);
-  window.addEventListener("keyup", handleKeyup);
+  window.addEventListener("keyup", handleKeyup, true);
+  window.addEventListener("blur", handleTabSwitcherWindowBlur);
+  document.addEventListener("visibilitychange", handleTabSwitcherVisibilityChange);
   window.addEventListener("dbx-open-driver-store", openDriverStoreFromEvent);
   window.addEventListener("dbx-mcp-status-changed", handleMcpStatusChanged);
   if (isDesktop) {
@@ -2686,8 +2692,12 @@ onUnmounted(() => {
     clearInterval(updateCheckTimer);
   }
   window.removeEventListener("keydown", handleNativeSelectAll, true);
+  window.removeEventListener("keydown", handleTabSwitcherKeydownCapture, true);
   window.removeEventListener("keydown", handleKeydown);
-  window.removeEventListener("keyup", handleKeyup);
+  window.removeEventListener("keyup", handleKeyup, true);
+  window.removeEventListener("blur", handleTabSwitcherWindowBlur);
+  document.removeEventListener("visibilitychange", handleTabSwitcherVisibilityChange);
+  tabSwitcherKeyboard.reset();
   window.removeEventListener("dbx-open-driver-store", openDriverStoreFromEvent);
   window.removeEventListener("dbx-mcp-status-changed", handleMcpStatusChanged);
   document.removeEventListener("contextmenu", handleContextMenu);
@@ -3039,7 +3049,7 @@ onUnmounted(() => {
         <ExternalSqlFileChangeDialog :prompt="externalSqlFilePrompt" @decide="externalSqlFileChanges.resolvePrompt" />
         <CloseActionPromptDialog v-if="isDesktop && showCloseActionPrompt" :open="showCloseActionPrompt" @update:open="handleCloseActionPromptOpenChange" @quit="chooseQuit" @minimize="chooseMinimize" />
         <QuickOpenDialog :open="showQuickOpen" @update:open="showQuickOpen = $event" @select="handleQuickOpenSelect" />
-        <TabSwitcherDialog :open="showTabSwitcher" :tabs="tabSwitcherTabs" :selected-index="tabSwitcherIndex" :shortcut-hint="tabSwitcherShortcutHint" @update:open="showTabSwitcher = $event" @update:selected-index="tabSwitcherIndex = $event" @select="handleTabSwitcherSelect" />
+        <TabSwitcherDialog :open="showTabSwitcher" :tabs="tabSwitcherTabs" :selected-index="tabSwitcherIndex" :shortcut-hint="tabSwitcherShortcutHint" @update:open="handleTabSwitcherOpenChange" @update:selected-index="tabSwitcherIndex = $event" @select="handleTabSwitcherSelect" />
       </div>
       <Teleport to="body">
         <FileText

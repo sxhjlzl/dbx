@@ -258,10 +258,10 @@ export function isSwitchToNextTabShortcut(event: ShortcutLikeEvent, shortcuts?: 
  * the configured combo (Ctrl+Shift+Tab by default) moves backward. Returns
  * null when the event is not the switcher shortcut.
  */
-export function tabSwitcherDirectionFromShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): -1 | 1 | null {
-  const shortcut = actionShortcut("tabSwitcher", shortcuts);
-  if (matchesShortcut(event, shortcut)) return 1;
-  if (event.shiftKey && matchesShortcut({ ...event, shiftKey: false }, shortcut)) return -1;
+export function tabSwitcherDirectionFromShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>, platform = globalThis.navigator?.platform || ""): -1 | 1 | null {
+  const shortcut = actionShortcut("tabSwitcher", shortcuts, platform);
+  if (matchesShortcut(event, shortcut, platform)) return 1;
+  if (event.shiftKey && matchesShortcut({ ...event, shiftKey: false }, shortcut, platform)) return -1;
   return null;
 }
 
