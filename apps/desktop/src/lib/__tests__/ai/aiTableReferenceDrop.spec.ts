@@ -3,6 +3,8 @@ import { aiTableMentionFromTableReference } from "@/lib/ai/aiTableReferenceDrop"
 import { createTableReferencePayload } from "@/lib/editor/queryEditorTableDrop";
 
 describe("ai table reference drop", () => {
+  const context = { connectionId: "conn-1", database: "app-db" };
+
   it("maps a table payload to a table mention", () => {
     const payload = createTableReferencePayload({
       connectionId: "conn-1",
@@ -12,7 +14,7 @@ describe("ai table reference drop", () => {
       databaseType: "postgres",
     });
 
-    expect(aiTableMentionFromTableReference(payload)).toEqual({
+    expect(aiTableMentionFromTableReference(payload, context)).toEqual({
       raw: "@public.users",
       schema: "public",
       table: "users",
@@ -27,7 +29,7 @@ describe("ai table reference drop", () => {
       databaseType: "mysql",
     });
 
-    expect(aiTableMentionFromTableReference(payload)).toEqual({
+    expect(aiTableMentionFromTableReference(payload, context)).toEqual({
       raw: '@"order items"',
       schema: undefined,
       table: "order items",
@@ -42,7 +44,7 @@ describe("ai table reference drop", () => {
       databaseType: "mysql",
     });
 
-    expect(aiTableMentionFromTableReference(payload)).toBeNull();
+    expect(aiTableMentionFromTableReference(payload, context)).toBeNull();
   });
 
   it("ignores column references", () => {
@@ -55,11 +57,11 @@ describe("ai table reference drop", () => {
       databaseType: "postgres",
     });
 
-    expect(aiTableMentionFromTableReference(payload)).toBeNull();
+    expect(aiTableMentionFromTableReference(payload, context)).toBeNull();
   });
 
   it("ignores empty payloads", () => {
-    expect(aiTableMentionFromTableReference(null)).toBeNull();
-    expect(aiTableMentionFromTableReference(undefined)).toBeNull();
+    expect(aiTableMentionFromTableReference(null, context)).toBeNull();
+    expect(aiTableMentionFromTableReference(undefined, context)).toBeNull();
   });
 });

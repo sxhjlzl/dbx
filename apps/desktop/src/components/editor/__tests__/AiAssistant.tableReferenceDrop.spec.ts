@@ -1,28 +1,53 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+// @vitest-environment happy-dom
 
-const aiAssistantSource = readFileSync(new URL("../AiAssistant.vue", import.meta.url), "utf8");
-const treeItemSource = readFileSync(new URL("../../sidebar/TreeItem.vue", import.meta.url), "utf8");
+import { afterEach, describe, expect, it } from "vitest";
+import { handleAiTableReferenceDropEvent, type AiTableReferenceDropContext } from "@/lib/ai/aiTableReferenceDrop";
+import { createTableReferenceDropEvent, createTableReferencePayload, DBX_TABLE_REFERENCE_DROP_EVENT, type QueryEditorTableReferencePayload } from "@/lib/editor/queryEditorTableDrop";
+
+function dispatchTableReferenceDrop(payload: QueryEditorTableReferencePayload, context: AiTableReferenceDropContext) {
+  const assistantRoot = document.createElement("div");
+  const target = document.createElement("span");
+  assistantRoot.append(target);
+  document.body.append(assistantRoot);
+  const mentions: string[] = [];
+  const listener = (event: Event) => {
+    handleAiTableReferenceDropEvent(event, {
+      context,
+      assistantRoot,
+      elementFromPoint: () => target,
+      onMention: (mention) => mentions.push(mention.raw),
+    });
+  };
+  window.addEventListener(DBX_TABLE_REFERENCE_DROP_EVENT, listener);
+  window.dispatchEvent(createTableReferenceDropEvent({ payload, clientX: 12, clientY: 24 }));
+  window.removeEventListener(DBX_TABLE_REFERENCE_DROP_EVENT, listener);
+  return mentions;
+}
+
+function tablePayload(overrides: Partial<QueryEditorTableReferencePayload> = {}) {
+  return createTableReferencePayload({
+    connectionId: overrides.connectionId ?? "conn-1",
+    database: overrides.database ?? "app-db",
+    schema: "public",
+    tableName: "users",
+    databaseType: "postgres",
+  })!;
+}
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
 
 describe("AI assistant table reference drop", () => {
-  it("marks the assistant root as a table-reference drop target", () => {
-    expect(aiAssistantSource).toContain("data-ai-assistant-root");
+  it("accepts a table dropped from the active connection and database", () => {
+    expect(dispatchTableReferenceDrop(tablePayload(), { connectionId: "conn-1", database: "app-db" })).toEqual(["@public.users"]);
   });
 
-  it("listens for table-reference drop events while mounted", () => {
-    expect(aiAssistantSource).toContain("window.addEventListener(DBX_TABLE_REFERENCE_DROP_EVENT, onTableReferenceDropEvent);");
-    expect(aiAssistantSource).toContain("window.removeEventListener(DBX_TABLE_REFERENCE_DROP_EVENT, onTableReferenceDropEvent);");
+  it("rejects a table dropped from another connection", () => {
+    expect(dispatchTableReferenceDrop(tablePayload({ connectionId: "conn-2" }), { connectionId: "conn-1", database: "app-db" })).toEqual([]);
   });
 
-  it("turns dropped table references into table mention chips", () => {
-    expect(aiAssistantSource).toContain("const mention = aiTableMentionFromTableReference(detail.payload);");
-    expect(aiAssistantSource).toContain("!assistantRootRef.value?.contains(target)");
-    expect(aiAssistantSource).toContain('addSelectedMention({ kind: "table", schema: mention.schema, name: mention.table, tableType: "table" });');
-    expect(aiAssistantSource).toContain("clearActiveTableReferencePayload(detail.payload);");
-  });
-
-  it("dispatches sidebar drags released over the AI assistant", () => {
-    expect(treeItemSource).toContain("AI_ASSISTANT_TABLE_DROP_ROOT_SELECTOR");
-    expect(treeItemSource).toContain("target.closest(`[data-query-editor-root], ${AI_ASSISTANT_TABLE_DROP_ROOT_SELECTOR}`)");
+  it("rejects a table dropped from another database", () => {
+    expect(dispatchTableReferenceDrop(tablePayload({ database: "analytics" }), { connectionId: "conn-1", database: "app-db" })).toEqual([]);
   });
 });

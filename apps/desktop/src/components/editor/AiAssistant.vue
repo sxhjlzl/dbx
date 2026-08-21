@@ -131,8 +131,8 @@ import ExplainPlanViewer from "@/components/explain/ExplainPlanViewer.vue";
 import { parseExplainResult, parseOracleExplainText, type ParsedExplainPlan } from "@/lib/diagram/explainPlan";
 import { copyToClipboard } from "@/lib/common/clipboard";
 import { AI_TABLE_MENTION_CANDIDATE_LIMIT, AI_TABLE_MENTION_SCHEMA_LIMIT, filterAiTableMentionCandidates, formatAiTableMention, parseAiTableMentions, type AiTableMention } from "@/lib/ai/aiTableMentions";
-import { aiTableMentionFromTableReference } from "@/lib/ai/aiTableReferenceDrop";
-import { DBX_TABLE_REFERENCE_DROP_EVENT, clearActiveTableReferencePayload, type QueryEditorTableReferenceDropDetail } from "@/lib/editor/queryEditorTableDrop";
+import { handleAiTableReferenceDropEvent } from "@/lib/ai/aiTableReferenceDrop";
+import { DBX_TABLE_REFERENCE_DROP_EVENT, clearActiveTableReferencePayload } from "@/lib/editor/queryEditorTableDrop";
 import { isAiPromptImeCompositionEvent, shouldSubmitAiPromptOnKeydown } from "@/lib/ai/aiPromptKeyboard";
 import { isActionableWriteProposalMessage, isActionableWriteSqlProposal, looksLikeActionProposal, looksLikeWriteSqlProposal, shouldGrantWriteSqlOnShortAffirmative } from "@/lib/ai/aiProposalDetect";
 import { visibleToActualIndex } from "@/lib/ai/aiMessageEdit";
@@ -2289,16 +2289,19 @@ function onTauriFileDrop(event: Event) {
 }
 
 function onTableReferenceDropEvent(event: Event) {
-  if (!(event instanceof CustomEvent)) return;
-  const detail = event.detail as QueryEditorTableReferenceDropDetail | undefined;
-  if (!detail?.payload) return;
-  const mention = aiTableMentionFromTableReference(detail.payload);
-  if (!mention) return;
-  const target = document.elementFromPoint(detail.clientX, detail.clientY);
-  if (!(target instanceof Element) || !assistantRootRef.value?.contains(target)) return;
-  addSelectedMention({ kind: "table", schema: mention.schema, name: mention.table, tableType: "table" });
-  clearActiveTableReferencePayload(detail.payload);
-  nextTick(() => promptTextareaRef.value?.focus());
+  handleAiTableReferenceDropEvent(event, {
+    context: {
+      connectionId: props.tab?.connectionId || props.connection?.id,
+      database: props.tab?.database || props.connection?.database || "",
+    },
+    assistantRoot: assistantRootRef.value,
+    elementFromPoint: (x, y) => document.elementFromPoint(x, y),
+    onMention: (mention, payload) => {
+      addSelectedMention({ kind: "table", schema: mention.schema, name: mention.table, tableType: "table" });
+      clearActiveTableReferencePayload(payload);
+      nextTick(() => promptTextareaRef.value?.focus());
+    },
+  });
 }
 
 async function send() {
